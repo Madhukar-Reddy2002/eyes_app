@@ -1,158 +1,154 @@
-import cv2
 import streamlit as st
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps, ImageFilter, ImageEnhance
+from io import BytesIO
+import cv2
 
-# Load the pre-trained face detection model (Haar Cascade)
-face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+def apply_gray(image):
+    return ImageOps.grayscale(image)
 
-def detect_faces(frame):
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    faces = face_cascade.detectMultiScale(gray, 1.3, 5)
-    for (x, y, w, h) in faces:
-        cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 100), 2)
-    return frame
+def apply_sepia(image):
+    sepia_filter = np.array([
+        [0.393, 0.769, 0.189],
+        [0.349, 0.686, 0.168],
+        [0.272, 0.534, 0.131]
+    ])
+    sepia_img = np.array(image).dot(sepia_filter.T)
+    sepia_img /= sepia_img.max()
+    return Image.fromarray(np.uint8(sepia_img * 255))
 
-def apply_gray(frame):
-    return cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+def apply_blur(image):
+    return image.filter(ImageFilter.BLUR)
 
-def apply_hsv(frame):
-    return cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+def apply_edge_detection(image):
+    return image.filter(ImageFilter.FIND_EDGES)
 
-def apply_smoothing(frame):
-    return cv2.GaussianBlur(frame, (15, 15), 0)
+def apply_emboss(image):
+    return image.filter(ImageFilter.EMBOSS)
 
-def apply_edge_detection(frame):
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    return cv2.Canny(gray, 100, 200)
+def apply_sharpen(image):
+    return image.filter(ImageFilter.SHARPEN)
 
-def apply_cartoon(frame):
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    gray = cv2.medianBlur(gray, 5)
-    edges = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 9, 9)
-    color = cv2.bilateralFilter(frame, 9, 300, 300)
-    cartoon = cv2.bitwise_and(color, color, mask=edges)
-    return cartoon
+def apply_brightness(image, factor):
+    enhancer = ImageEnhance.Brightness(image)
+    return enhancer.enhance(factor)
 
-def apply_noise_reduction(frame):
-    return cv2.fastNlMeansDenoisingColored(frame, None, 10, 10, 7, 21)
+def apply_contrast(image, factor):
+    enhancer = ImageEnhance.Contrast(image)
+    return enhancer.enhance(factor)
+
+def process_image(image, effect, brightness, contrast):
+    processed_image = image.copy()
+
+    if effect == 'Gray':
+        processed_image = apply_gray(processed_image)
+    elif effect == 'Sepia':
+        processed_image = apply_sepia(processed_image)
+    elif effect == 'Blur':
+        processed_image = apply_blur(processed_image)
+    elif effect == 'Edge Detection':
+        processed_image = apply_edge_detection(processed_image)
+    elif effect == 'Emboss':
+        processed_image = apply_emboss(processed_image)
+    elif effect == 'Sharpen':
+        processed_image = apply_sharpen(processed_image)
+
+    processed_image = apply_brightness(processed_image, brightness)
+    processed_image = apply_contrast(processed_image, contrast)
+
+    return processed_image
 
 # Set up Streamlit app
 st.set_page_config(page_title="Image Processing App", page_icon=":camera:", layout="wide")
 
-# Sidebar for navigation and controls
+# Sidebar for controls
 st.sidebar.title("Image Processing App")
 
-# Initialize session state
-if 'run_camera' not in st.session_state:
-    st.session_state.run_camera = False
-if 'effect' not in st.session_state:
-    st.session_state.effect = 'None'
-if 'face_detection' not in st.session_state:
-    st.session_state.face_detection = False
-
-# Camera control
-camera_control = st.sidebar.empty()
-if not st.session_state.run_camera:
-    if camera_control.button('Start Camera'):
-        st.session_state.run_camera = True
-else:
-    if camera_control.button('Stop Camera'):
-        st.session_state.run_camera = False
+# Input method selection
+input_method = st.sidebar.radio("Select Input Method", ("Upload Image", "Use Webcam"))
 
 # Effect selection
 effect = st.sidebar.selectbox(
     'Select Effect',
-    ('None', 'Gray', 'HSV', 'Smoothing', 'Edge Detection', 'Cartoon', 'Noise Reduction'),
-    key='effect'
+    ('None', 'Gray', 'Sepia', 'Blur', 'Edge Detection', 'Emboss', 'Sharpen')
 )
 
-# Face detection toggle
-face_detection = st.sidebar.checkbox('Enable Face Detection', key='face_detection')
+# Brightness and Contrast sliders
+brightness = st.sidebar.slider('Brightness', 0.0, 2.0, 1.0, 0.1)
+contrast = st.sidebar.slider('Contrast', 0.0, 2.0, 1.0, 0.1)
 
-# Main area for displaying video
+# Main area for displaying images
 st.title("Image Processing App")
-st.write("Use the sidebar to control the camera, apply effects, and toggle face detection.")
 
-# Placeholder for video stream
-stframe = st.empty()
+if input_method == "Upload Image":
+    st.write("Upload an image and apply various effects using the sidebar controls.")
+    uploaded_file = st.file_uploader("Choose an image file", type=["jpg", "jpeg", "png"])
 
-if st.session_state.run_camera:
+    if uploaded_file is not None:
+        image = Image.open(uploaded_file)
+        processed_image = process_image(image, effect, brightness, contrast)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("Original Image")
+            st.image(image, use_column_width=True)
+        with col2:
+            st.subheader("Processed Image")
+            st.image(processed_image, use_column_width=True)
+
+        buffered = BytesIO()
+        processed_image.save(buffered, format="PNG")
+        st.download_button(
+            label="Download processed image",
+            data=buffered.getvalue(),
+            file_name="processed_image.png",
+            mime="image/png"
+        )
+    else:
+        st.write("Please upload an image to begin processing.")
+
+else:  # Use Webcam
+    st.write("Capture an image from your webcam and apply effects in real-time.")
+    
     # Initialize webcam
     cap = cv2.VideoCapture(0)
 
     if not cap.isOpened():
-        st.error("Error: Could not open webcam")
+        st.error("Error: Could not open webcam. Please make sure your webcam is connected and not being used by another application.")
     else:
-        while st.session_state.run_camera:
+        # Create a button to capture image
+        if st.button("Capture Image"):
             ret, frame = cap.read()
-            if not ret:
-                st.error("Error: Failed to capture video frame")
-                break
+            if ret:
+                image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                processed_image = process_image(image, effect, brightness, contrast)
 
-            # Apply selected image processing effect
-            if effect == 'Gray':
-                frame = apply_gray(frame)
-            elif effect == 'HSV':
-                frame = apply_hsv(frame)
-            elif effect == 'Smoothing':
-                frame = apply_smoothing(frame)
-            elif effect == 'Edge Detection':
-                frame = apply_edge_detection(frame)
-            elif effect == 'Cartoon':
-                frame = apply_cartoon(frame)
-            elif effect == 'Noise Reduction':
-                frame = apply_noise_reduction(frame)
-            
-            # Apply face detection if enabled
-            if face_detection:
-                frame = detect_faces(frame)
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.subheader("Captured Image")
+                    st.image(image, use_column_width=True)
+                with col2:
+                    st.subheader("Processed Image")
+                    st.image(processed_image, use_column_width=True)
 
-            # Convert to RGB for display
-            if effect != 'HSV':
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                buffered = BytesIO()
+                processed_image.save(buffered, format="PNG")
+                st.download_button(
+                    label="Download processed image",
+                    data=buffered.getvalue(),
+                    file_name="processed_image.png",
+                    mime="image/png"
+                )
+            else:
+                st.error("Error: Failed to capture image from webcam.")
 
-            # Display the processed frame
-            stframe.image(frame, channels="RGB", use_column_width=True)
-
-        # Release the webcam when the loop ends
+        # Release the webcam when the app is closed
         cap.release()
 
-else:
-    st.write("Camera is stopped. Click 'Start Camera' to begin.")
-
-# Add a file uploader for processing static images
-uploaded_file = st.file_uploader("Choose an image file", type=["jpg", "jpeg", "png"])
-
-if uploaded_file is not None:
-    # Read the image file
-    image = Image.open(uploaded_file)
-    img_array = np.array(image)
-
-    # Convert RGB to BGR (OpenCV uses BGR)
-    img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
-
-    # Apply selected effect
-    if effect == 'Gray':
-        img_array = apply_gray(img_array)
-    elif effect == 'HSV':
-        img_array = apply_hsv(img_array)
-    elif effect == 'Smoothing':
-        img_array = apply_smoothing(img_array)
-    elif effect == 'Edge Detection':
-        img_array = apply_edge_detection(img_array)
-    elif effect == 'Cartoon':
-        img_array = apply_cartoon(img_array)
-    elif effect == 'Noise Reduction':
-        img_array = apply_noise_reduction(img_array)
-
-    # Apply face detection if enabled
-    if face_detection:
-        img_array = detect_faces(img_array)
-
-    # Convert back to RGB for display
-    if effect != 'HSV':
-        img_array = cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB)
-
-    # Display the processed image
-    st.image(img_array, caption='Processed Image', use_column_width=True)
+# Add some information about the app
+st.sidebar.markdown("---")
+st.sidebar.subheader("About")
+st.sidebar.info("This app allows you to apply various image processing effects to your uploaded images or webcam captures. "
+                "Select an effect from the dropdown menu and adjust brightness and contrast as needed.")
+st.sidebar.markdown("Created by [Your Name/Organization]")
+st.sidebar.markdown("[Source Code](https://github.com/yourusername/your-repo)")

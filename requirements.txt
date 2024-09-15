@@ -1,3 +1,7 @@
 streamlit
 opencv-python
+numpystreamlit
+opencv-python
 numpy
+pillow
+mediapipe
